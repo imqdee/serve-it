@@ -1,0 +1,17 @@
+[package]
+name = "serve-it"
+version = "0.1.0"
+edition = "2024"
+description = "Serve a single local file over HTTP"
+license = "MIT"
+repository = "https://github.com/imqdee/serve-it"
+homepage = "https://github.com/imqdee/serve-it"
+keywords = ["http", "server", "local", "file", "cli"]
+categories = ["command-line-utilities", "development-tools", "web-programming::http-server"]
+
+[[bin]]
+name = "serve"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
