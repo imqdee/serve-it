@@ -13,10 +13,14 @@ cargo install serve-it
 ```sh
 # Serve a file on the default port (8000)
 serve ./data.json
+# → http://127.0.0.1:8000/data.json
 
 # Serve on a custom port
 serve ./index.html 9000
+# → http://127.0.0.1:9000/index.html
 ```
+
+The file is served at a path matching its filename. Any other path returns a `404`.
 
 ## Options
 

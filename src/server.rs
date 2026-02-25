@@ -42,10 +42,12 @@ impl From<std::io::Error> for ServeError {
 pub fn start(path: &Path, port: u16) -> Result<(), ServeError> {
     let content_type = mime::content_type(path);
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let serve_path = format!("/{filename}");
 
     eprintln!("  Serving {}", path.display());
     eprintln!("  Content-Type: {content_type}");
-    eprintln!("  http://127.0.0.1:{port}");
+    eprintln!("  http://127.0.0.1:{port}{serve_path}");
     eprintln!();
 
     for stream in listener.incoming() {
@@ -62,6 +64,22 @@ pub fn start(path: &Path, port: u16) -> Result<(), ServeError> {
         let mut parts = request_line.split_whitespace();
         let method = parts.next().unwrap_or("???");
         let path_req = parts.next().unwrap_or("/");
+
+        if path_req != serve_path {
+            let body = b"404 Not Found";
+            let response = format!(
+                "HTTP/1.1 404 Not Found\r\n\
+                 Content-Type: text/plain\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\
+                 \r\n",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(body);
+            eprintln!("  {method} {path_req} 404");
+            continue;
+        }
 
         match fs::read(path) {
             Ok(body) => {
@@ -102,6 +120,87 @@ pub fn start(path: &Path, port: u16) -> Result<(), ServeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    fn free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn request(port: u16, path: &str) -> String {
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        stream.write_all(req.as_bytes()).unwrap();
+        let mut buf = String::new();
+        stream.read_to_string(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn serves_file_at_filename_path() {
+        let dir = std::env::temp_dir().join("serve_test_ok");
+        let _ = fs::create_dir_all(&dir);
+        let file = dir.join("data.json");
+        fs::write(&file, r#"{"ok":true}"#).unwrap();
+
+        let port = free_port();
+        let file_clone = file.clone();
+        std::thread::spawn(move || {
+            let _ = start(&file_clone, port);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let resp = request(port, "/data.json");
+        assert!(resp.starts_with("HTTP/1.1 200 OK"));
+        assert!(resp.contains("application/json"));
+        assert!(resp.contains(r#"{"ok":true}"#));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn returns_404_for_root_path() {
+        let dir = std::env::temp_dir().join("serve_test_root");
+        let _ = fs::create_dir_all(&dir);
+        let file = dir.join("data.json");
+        fs::write(&file, r#"{"ok":true}"#).unwrap();
+
+        let port = free_port();
+        let file_clone = file.clone();
+        std::thread::spawn(move || {
+            let _ = start(&file_clone, port);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let resp = request(port, "/");
+        assert!(resp.starts_with("HTTP/1.1 404 Not Found"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn returns_404_for_wrong_path() {
+        let dir = std::env::temp_dir().join("serve_test_wrong");
+        let _ = fs::create_dir_all(&dir);
+        let file = dir.join("data.json");
+        fs::write(&file, r#"{"ok":true}"#).unwrap();
+
+        let port = free_port();
+        let file_clone = file.clone();
+        std::thread::spawn(move || {
+            let _ = start(&file_clone, port);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let resp = request(port, "/other.json");
+        assert!(resp.starts_with("HTTP/1.1 404 Not Found"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn serve_error_display() {
